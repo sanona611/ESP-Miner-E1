@@ -8,6 +8,7 @@
 void free_bm_job(bm_job *job)
 {
     free(job->jobid);
+	free(job->extranonce1);
     free(job->extranonce2);
     free(job);
 }

@@ -1,6 +1,8 @@
 #include "work_queue.h"
 #include "global_state.h"
 #include "esp_log.h"
+#include "esp_random.h"
+#include "esp_timer.h"
 #include "esp_system.h"
 #include "mining.h"
 #include <limits.h>
@@ -10,14 +12,47 @@
 
 static const char *TAG = "create_jobs_task";
 
+static char *miner_extranonce1 = NULL;
+static int64_t miner_extranonce1_time = 0;
+
 #define QUEUE_LOW_WATER_MARK 10 // Adjust based on your requirements
 
 static bool should_generate_more_work(GlobalState *GLOBAL_STATE);
-static void generate_work(GlobalState *GLOBAL_STATE, mining_notify *notification, uint32_t extranonce_2);
+static void generate_work(GlobalState *GLOBAL_STATE, mining_notify *notification, const char *extranonce_1 ,uint32_t extranonce_2);
+
+static char *generate_miner_extranonce1(void)
+{
+    uint32_t random_value;
+    char *extranonce1;
+
+    random_value = esp_random();
+
+    extranonce1 = malloc(9);
+    if (extranonce1 == NULL)
+    {
+        ESP_LOGE(TAG, "Failed to allocate miner extranonce1");
+        return NULL;
+    }
+
+    snprintf(extranonce1, 9, "%08lx", (unsigned long)random_value);
+
+    ESP_LOGI(TAG, "New miner extranonce1: %s", extranonce1);
+
+    return extranonce1;
+}
 
 void create_jobs_task(void *pvParameters)
 {
     GlobalState *GLOBAL_STATE = (GlobalState *)pvParameters;
+	miner_extranonce1 = generate_miner_extranonce1();
+	if (miner_extranonce1 == NULL)
+	{
+		ESP_LOGE(TAG, "Failed to generate initial miner extranonce1");
+		vTaskDelete(NULL);
+		return;
+	}
+
+	miner_extranonce1_time = esp_timer_get_time();
 
     while (1)
     {
@@ -39,10 +74,22 @@ void create_jobs_task(void *pvParameters)
         uint32_t extranonce_2 = 0;
         while (GLOBAL_STATE->stratum_queue.count < 1 && GLOBAL_STATE->abandon_work == 0)
         {
+			int64_t now = esp_timer_get_time();
+			if ((now - miner_extranonce1_time) >= 1000000)
+			{
+				char *new_extranonce1 = generate_miner_extranonce1();
+				if (new_extranonce1 != NULL)
+				{
+					free(miner_extranonce1);
+					miner_extranonce1 = new_extranonce1;
+					miner_extranonce1_time = now;
+					extranonce_2 = 0;
+					ESP_LOGI(TAG, "E1 changed, E2 reset to 0");
+				}
+			}
             if (should_generate_more_work(GLOBAL_STATE))
             {
-                generate_work(GLOBAL_STATE, mining_notification, extranonce_2);
-
+                generate_work(GLOBAL_STATE, mining_notification, miner_extranonce1, extranonce_2);
                 // Increase extranonce_2 for the next job.
                 extranonce_2++;
             }
@@ -69,7 +116,7 @@ static bool should_generate_more_work(GlobalState *GLOBAL_STATE)
     return GLOBAL_STATE->ASIC_jobs_queue.count < QUEUE_LOW_WATER_MARK;
 }
 
-static void generate_work(GlobalState *GLOBAL_STATE, mining_notify *notification, uint32_t extranonce_2)
+static void generate_work(GlobalState *GLOBAL_STATE, mining_notify *notification, const char *extranonce_1, uint32_t extranonce_2)
 {
     char *extranonce_2_str = extranonce_2_generate(extranonce_2, GLOBAL_STATE->extranonce_2_len);
     if (extranonce_2_str == NULL) {
@@ -77,7 +124,7 @@ static void generate_work(GlobalState *GLOBAL_STATE, mining_notify *notification
         return;
     }
 
-    char *coinbase_tx = construct_coinbase_tx(notification->coinbase_1, notification->coinbase_2, GLOBAL_STATE->extranonce_str, extranonce_2_str);
+    char *coinbase_tx = construct_coinbase_tx(notification->coinbase_1, notification->coinbase_2, extranonce_1, extranonce_2_str);
     if (coinbase_tx == NULL) {
         ESP_LOGE(TAG, "Failed to construct coinbase_tx");
         free(extranonce_2_str);
@@ -105,6 +152,7 @@ static void generate_work(GlobalState *GLOBAL_STATE, mining_notify *notification
 
     memcpy(queued_next_job, &next_job, sizeof(bm_job));
     queued_next_job->extranonce2 = extranonce_2_str; // Transfer ownership
+	queued_next_job->extranonce1 = strdup(extranonce_1);
     queued_next_job->jobid = strdup(notification->job_id);
     queued_next_job->version_mask = GLOBAL_STATE->version_mask;
 

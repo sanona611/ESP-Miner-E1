@@ -22,6 +22,7 @@ typedef struct
     uint8_t midstate3[32];
     uint32_t pool_diff;
     char *jobid;
+	char *extranonce1;
     char *extranonce2;
 } bm_job;
 
