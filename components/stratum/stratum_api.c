@@ -133,6 +133,8 @@ void STRATUM_V1_parse(StratumApiV1Message * message, const char * stratum_json)
             result = MINING_NOTIFY;
         } else if (strcmp("mining.set_difficulty", method_json->valuestring) == 0) {
             result = MINING_SET_DIFFICULTY;
+		} else if (strcmp("mining.set_extranonce", method_json->valuestring) == 0) {
+			result = MINING_SET_EXTRANONCE;
         } else if (strcmp("mining.set_version_mask", method_json->valuestring) == 0) {
             result = MINING_SET_VERSION_MASK;
         } else if (strcmp("client.reconnect", method_json->valuestring) == 0) {
@@ -266,6 +268,21 @@ void STRATUM_V1_parse(StratumApiV1Message * message, const char * stratum_json)
         uint32_t difficulty = cJSON_GetArrayItem(params, 0)->valueint;
 
         message->new_difficulty = difficulty;
+	} else if (message->method == MINING_SET_EXTRANONCE) {
+		cJSON * params = cJSON_GetObjectItem(json, "params");
+		cJSON * extranonce_json = cJSON_GetArrayItem(params, 0);
+		cJSON * extranonce2_len_json = cJSON_GetArrayItem(params, 1);
+		if (extranonce_json == NULL || !cJSON_IsString(extranonce_json) ||
+			extranonce2_len_json == NULL || !cJSON_IsNumber(extranonce2_len_json)) {
+			ESP_LOGE(TAG, "Invalid mining.set_extranonce message: %s", stratum_json);
+			message->response_success = false;
+			goto done;
+		}
+		message->extranonce_str = strdup(extranonce_json->valuestring);
+		message->extranonce_2_len = extranonce2_len_json->valueint;
+		ESP_LOGI(TAG, "Pool set extranonce1: %s, extranonce2_len: %d",
+				message->extranonce_str,
+				message->extranonce_2_len);
     } else if (message->method == MINING_SET_VERSION_MASK) {
 
         cJSON * params = cJSON_GetObjectItem(json, "params");

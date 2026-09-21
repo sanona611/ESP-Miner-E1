@@ -293,6 +293,17 @@ void stratum_task(void * pvParameters)
             } else if (stratum_api_v1_message.method == STRATUM_RESULT_SUBSCRIBE) {
                 GLOBAL_STATE->extranonce_str = stratum_api_v1_message.extranonce_str;
                 GLOBAL_STATE->extranonce_2_len = stratum_api_v1_message.extranonce_2_len;
+			} else if (stratum_api_v1_message.method == MINING_SET_EXTRANONCE) {
+				GLOBAL_STATE->extranonce_2_len = stratum_api_v1_message.extranonce_2_len;
+				ESP_LOGI(TAG, "Pool changed extranonce1 to %s, extranonce2_len=%d",
+						stratum_api_v1_message.extranonce_str,
+						stratum_api_v1_message.extranonce_2_len);
+				/*
+				* IMPORTANT:
+				* Do not replace GLOBAL_STATE->extranonce_str here.
+				* create_jobs_task uses the miner-controlled E1.
+				*/
+				cleanQueue(GLOBAL_STATE);
             } else if (stratum_api_v1_message.method == CLIENT_RECONNECT) {
                 ESP_LOGE(TAG, "Pool requested client reconnect...");
                 stratum_close_connection(GLOBAL_STATE);
